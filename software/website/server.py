@@ -5,6 +5,8 @@ import configparser
 from pathlib import Path
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.ini"
+DEFAULT_START_TABLE = 1
+DEFAULT_END_TABLE = 16
 
 def load_config():
     config = configparser.ConfigParser()
@@ -16,30 +18,29 @@ def load_config():
 
     server_url = config.get("classroom", "server_url", fallback="").strip()
     event_password = config.get("classroom", "event_password", fallback="").strip()
+    start_table = config.getint("classroom", "start_table", fallback=DEFAULT_START_TABLE)
+    end_table = config.getint("classroom", "end_table", fallback=DEFAULT_END_TABLE)
 
     if not server_url:
         raise SystemExit("Missing required config key: classroom.server_url")
     if not event_password:
         raise SystemExit("Missing required config key: classroom.event_password")
-
-    return server_url, event_password
+    return server_url, event_password, start_table, end_table
 
 app = Flask(__name__)
 
 clients = []
 table_state = {}
 
-START_TABLE = 5
-END_TABLE = 40
 ALLOWED_COLORS = {"red", "orange", "green"}
-SERVER_URL, EVENT_PASSWORD = load_config()
+SERVER_URL, EVENT_PASSWORD, START_TABLE, END_TABLE = load_config()
 
 @app.route("/")
 def index():
     return render_template(
         "index.html",
         start_table=START_TABLE,
-        end_table=END_TABLE
+        end_table=END_TABLE + 1
     )
 
 # Receive events from teacher application
@@ -56,7 +57,7 @@ def receive_event():
     table = data.get("table")
     color = data.get("color")
 
-    if not isinstance(table, int) or table < START_TABLE or table >= END_TABLE:
+    if not isinstance(table, int) or table < START_TABLE or table > END_TABLE:
         return {"status": "error", "message": "invalid table"}, 400
 
     if color not in ALLOWED_COLORS:
