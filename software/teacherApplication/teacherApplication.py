@@ -1,9 +1,54 @@
 import tkinter as tk
 from tkinter import ttk
+import requests
 import serial
 import threading
 import time
 import serial.tools.list_ports
+import configparser
+from pathlib import Path
+
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.ini"
+
+def load_config():
+    config = configparser.ConfigParser()
+    if not config.read(CONFIG_PATH):
+        print(f"Warning: Missing config file {CONFIG_PATH}, server communication will be disabled.")
+        return None, None
+
+    if not config.has_section("classroom"):
+        raise SystemExit("Missing [classroom] section in config.ini")
+
+    submit_to_server = config.getboolean("classroom", "submit_to_server", fallback=False)
+    if not submit_to_server:
+        print("submit_to_server is set to false, skipping server configuration")
+        return None, None
+    server_url = config.get("classroom", "server_url", fallback="").strip()
+    event_password = config.get("classroom", "event_password", fallback="").strip()
+
+    if not server_url:
+        raise SystemExit("Missing required config key: classroom.server_url")
+    if server_url and not event_password:
+        raise SystemExit("Missing required config key: classroom.event_password")
+
+    return server_url, event_password
+
+
+SERVER_URL, EVENT_PASSWORD = load_config()
+
+def send_to_server(table, color):
+    if not SERVER_URL:
+        return
+    try:
+        headers = {
+            "X-Event-Password": EVENT_PASSWORD
+        }
+        requests.post(SERVER_URL, json={
+            "table": table,
+            "color": color
+        }, headers=headers, timeout=0.2)
+    except:
+        pass
 
 def process_serial_data():
     global ser
@@ -70,6 +115,7 @@ def update_table_color_from_serial(index, color_id):
 
         canvases[index].itemconfig('table', fill=new_color)
         table_colors[index] = new_color
+        send_to_server(index + start_table, new_color)
     else:
         print(f"Invalid ColorID: {color_id}")
 
@@ -85,6 +131,7 @@ def cycle_table_color(index):
 
     canvases[index].itemconfig('table', fill=next_color)
     table_colors[index] = next_color
+    send_to_server(index + start_table, next_color)
 
     # Send "hooray" over serial if connected
     if ser and ser.is_open:
@@ -103,6 +150,7 @@ def reset_all_green():
 
             canvases[index - start_table].itemconfig('table', fill='green')
             table_colors[index - start_table] = 'green'
+            send_to_server(index, 'green')
 
         # Send "hooray" over serial if connected
         msg = "T,-1,0\n"

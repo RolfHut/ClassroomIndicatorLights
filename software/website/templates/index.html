@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stoplichtstatus</title>
+
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 10px;
+            box-sizing: border-box;
+            height: 100vh;
+            display: flex;
+        }
+
+        #container {
+            max-width: 500px;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        #grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-auto-rows: 1fr;
+            gap: 8px;
+            width: 100%;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .table {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            container-type: size;
+            color: white;
+            background: rgb(156, 156, 156);
+            border-radius: 6px;
+        }
+
+        .table-label {
+            font-size: 70cqh;
+            line-height: 1;
+        }
+
+        .red {
+            background-color: rgb(255, 71, 71);
+        }
+
+        .orange {
+            background-color: rgb(230, 161, 34);
+        }
+
+        .green {
+            background-color: rgb(71, 176, 71);
+        }
+    </style>
+</head>
+
+<body>
+<div id="container">
+    <div id="grid"></div>
+</div>
+
+<script>
+    const startTable = {{ start_table }};
+    const endTable = {{ end_table }};
+    const allowedColors = new Set(["red", "orange", "green"]);
+    const totalTables = endTable - startTable;
+    const numRows = Math.ceil(totalTables / 2);
+
+    const grid = document.getElementById("grid");
+
+    function createGrid() {
+        for (let i = startTable; i < endTable; i++) {
+
+            const pos = i - startTable;
+
+            let col, row;
+
+            if (pos < numRows) {
+                col = 0;
+                row = numRows - pos - 1;
+            } else {
+                col = 1;
+                row = pos - numRows;
+            }
+
+            const div = document.createElement("div");
+            div.className = "table";
+            div.id = "table-" + i;
+
+            const label = document.createElement("span");
+            label.className = "table-label";
+            label.textContent = i;
+            div.appendChild(label);
+
+            div.style.gridColumn = col + 1;
+            div.style.gridRow = row + 1;
+
+            grid.appendChild(div);
+        }
+    }
+
+    function updateTable(id, color) {
+        const el = document.getElementById("table-" + id);
+        if (el) {
+            el.classList.remove("red", "orange", "green");
+            if (allowedColors.has(color)) {
+                el.classList.add(color);
+            }
+        }
+    }
+
+    const evtentSource = new EventSource("/events");
+
+    evtentSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateTable(data.table, data.color);
+    };
+
+    createGrid();
+</script>
+
+</body>
+</html>
