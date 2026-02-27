@@ -16,16 +16,13 @@ def load_config():
     if not config.has_section("classroom"):
         raise SystemExit("Missing [classroom] section in config.ini")
 
-    server_url = config.get("classroom", "server_url", fallback="").strip()
     event_password = config.get("classroom", "event_password", fallback="").strip()
     start_table = config.getint("classroom", "start_table", fallback=DEFAULT_START_TABLE)
     end_table = config.getint("classroom", "end_table", fallback=DEFAULT_END_TABLE)
 
-    if not server_url:
-        raise SystemExit("Missing required config key: classroom.server_url")
     if not event_password:
         raise SystemExit("Missing required config key: classroom.event_password")
-    return server_url, event_password, start_table, end_table
+    return event_password, start_table, end_table
 
 app = Flask(__name__)
 
@@ -33,7 +30,7 @@ clients = []
 table_state = {}
 
 ALLOWED_COLORS = {"red", "orange", "green"}
-SERVER_URL, EVENT_PASSWORD, START_TABLE, END_TABLE = load_config()
+EVENT_PASSWORD, START_TABLE, END_TABLE = load_config()
 
 @app.route("/")
 def index():
