@@ -1,9 +1,59 @@
 import tkinter as tk
 from tkinter import ttk
+import requests
 import serial
 import threading
 import time
 import serial.tools.list_ports
+import configparser
+from pathlib import Path
+
+CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.ini"
+DEFAULT_START_TABLE = 1
+DEFAULT_END_TABLE = 16
+
+def load_config():
+    config = configparser.ConfigParser()
+    if not config.read(CONFIG_PATH):
+        print(f"Warning: Missing config file {CONFIG_PATH}, server communication will be disabled.")
+        return None, None, DEFAULT_START_TABLE, DEFAULT_END_TABLE
+
+    if not config.has_section("classroom"):
+        raise SystemExit("Missing [classroom] section in config.ini")
+
+    start_table = config.getint("classroom", "start_table", fallback=DEFAULT_START_TABLE)
+    end_table = config.getint("classroom", "end_table", fallback=DEFAULT_END_TABLE)
+
+    submit_to_server = config.getboolean("classroom", "submit_to_server", fallback=False)
+    if not submit_to_server:
+        print("submit_to_server is set to false, skipping server configuration")
+        return None, None, start_table, end_table
+    server_url = config.get("classroom", "server_url", fallback="").strip()
+    event_password = config.get("classroom", "event_password", fallback="").strip()
+
+    if not server_url:
+        raise SystemExit("Missing required config key: classroom.server_url")
+    if server_url and not event_password:
+        raise SystemExit("Missing required config key: classroom.event_password")
+
+    return server_url, event_password, start_table, end_table
+
+
+SERVER_URL, EVENT_PASSWORD, CONFIG_START_TABLE, CONFIG_END_TABLE = load_config()
+
+def send_to_server(table, color):
+    if not SERVER_URL:
+        return
+    try:
+        headers = {
+            "X-Event-Password": EVENT_PASSWORD
+        }
+        requests.post(SERVER_URL, json={
+            "table": table,
+            "color": color
+        }, headers=headers, timeout=0.2)
+    except:
+        pass
 
 def process_serial_data():
     global ser
@@ -32,7 +82,7 @@ def process_serial_data():
             #    print(f"Room {room} is not selected, ignoring message.")
             #    continue
 
-            if ((start_table > int(table_str)) or (int(table_str) > end_table)):
+            if ((start_table > int(table_str)) or (int(table_str) >= end_table)):
                 print("Table number outside of selected range, ignoring")
                 continue
 
@@ -70,6 +120,7 @@ def update_table_color_from_serial(index, color_id):
 
         canvases[index].itemconfig('table', fill=new_color)
         table_colors[index] = new_color
+        send_to_server(index + start_table, new_color)
     else:
         print(f"Invalid ColorID: {color_id}")
 
@@ -85,6 +136,7 @@ def cycle_table_color(index):
 
     canvases[index].itemconfig('table', fill=next_color)
     table_colors[index] = next_color
+    send_to_server(index + start_table, next_color)
 
     # Send "hooray" over serial if connected
     if ser and ser.is_open:
@@ -103,6 +155,7 @@ def reset_all_green():
 
             canvases[index - start_table].itemconfig('table', fill='green')
             table_colors[index - start_table] = 'green'
+            send_to_server(index, 'green')
 
         # Send "hooray" over serial if connected
         msg = "T,-1,0\n"
@@ -197,8 +250,8 @@ def update_table_range():
         print("Invalid start or end table number.")
 
 # Initialize table range
-start_table = 1
-end_table = 16
+start_table = CONFIG_START_TABLE
+end_table = CONFIG_END_TABLE + 1
 red_start_time = [None] * (end_table - start_table)
 table_colors = ['green'] * (end_table - start_table)
 ser = None  # Serial connection object
@@ -225,11 +278,11 @@ table_range_frame = tk.Frame(root)
 table_range_frame.grid(row=0, column=3, padx=10, pady=10, sticky='w')
 tk.Label(table_range_frame, text="Start Table:").pack()
 start_table_entry = tk.Entry(table_range_frame, width=5)
-start_table_entry.insert(0, "1")
+start_table_entry.insert(0, str(CONFIG_START_TABLE))
 start_table_entry.pack(pady=5)
 tk.Label(table_range_frame, text="End Table:").pack()
 end_table_entry = tk.Entry(table_range_frame, width=5)
-end_table_entry.insert(0, "16")
+end_table_entry.insert(0, str(CONFIG_END_TABLE))
 end_table_entry.pack(pady=5)
 update_table_button = tk.Button(table_range_frame, text="Update Tables", command=update_table_range)
 update_table_button.pack(pady=5)
