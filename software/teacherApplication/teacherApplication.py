@@ -12,11 +12,57 @@ CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.ini"
 DEFAULT_START_TABLE = 1
 DEFAULT_END_TABLE = 16
 
+
+def build_default_table_columns(start_table, end_table):
+    total_tables = end_table - start_table + 1
+    if total_tables <= 0:
+        raise ValueError("end_table must be >= start_table")
+    
+    if total_tables == 1:
+        return [[start_table]]
+
+    first_count = (total_tables + 1) // 2
+    first_col = list(range(start_table, start_table + first_count))[::-1]
+    second_col = list(range(start_table + first_count, end_table + 1))
+
+    columns = [first_col, second_col]
+    return columns
+
+
+def parse_table_layout(layout, start_table, end_table):
+    if not layout:
+        return None
+
+    columns = []
+    for segment in layout.split(","):
+        segment = segment.strip()
+        if not segment:
+            continue
+
+        if "-" not in segment:
+            raise ValueError(f"Invalid layout segment: {segment}")
+
+        start_str, end_str = segment.split("-", 1)
+        try:
+            start_num = int(start_str)
+            end_num = int(end_str)
+        except ValueError:
+            raise ValueError(f"Invalid numbers in layout segment: {segment}")
+
+        if not (start_table <= start_num <= end_table) or not (start_table <= end_num <= end_table):
+            raise ValueError(f"Table numbers in layout segment must be between {start_table} and {end_table}: {segment}")
+
+        step = 1 if end_num >= start_num else -1
+        columns.append(list(range(start_num, end_num + step, step)))
+
+    return columns
+
+
 def load_config():
     config = configparser.ConfigParser()
     if not config.read(CONFIG_PATH):
         print(f"Warning: Missing config file {CONFIG_PATH}, server communication will be disabled.")
-        return None, None, DEFAULT_START_TABLE, DEFAULT_END_TABLE
+        return None, None, DEFAULT_START_TABLE, DEFAULT_END_TABLE, build_default_table_columns(DEFAULT_START_TABLE, DEFAULT_END_TABLE)
 
     if not config.has_section("classroom"):
         raise SystemExit("Missing [classroom] section in config.ini")
@@ -24,10 +70,19 @@ def load_config():
     start_table = config.getint("classroom", "start_table", fallback=DEFAULT_START_TABLE)
     end_table = config.getint("classroom", "end_table", fallback=DEFAULT_END_TABLE)
 
+    table_layout = config.get("classroom", "table_layout", fallback="").strip()
+    if table_layout:
+        try:
+            table_columns = parse_table_layout(table_layout, start_table, end_table)
+        except ValueError as e:
+            raise SystemExit(f"Invalid classroom.table_layout: {e}")
+    else:
+        table_columns = build_default_table_columns(start_table, end_table)
+
     submit_to_server = config.getboolean("classroom", "submit_to_server", fallback=False)
     if not submit_to_server:
         print("submit_to_server is set to false, skipping server configuration")
-        return None, None, start_table, end_table
+        return None, None, start_table, end_table, table_columns
     server_url = config.get("classroom", "server_url", fallback="").strip()
     event_password = config.get("classroom", "event_password", fallback="").strip()
 
@@ -36,10 +91,10 @@ def load_config():
     if server_url and not event_password:
         raise SystemExit("Missing required config key: classroom.event_password")
 
-    return server_url, event_password, start_table, end_table
+    return server_url, event_password, start_table, end_table, table_columns
 
 
-SERVER_URL, EVENT_PASSWORD, CONFIG_START_TABLE, CONFIG_END_TABLE = load_config()
+SERVER_URL, EVENT_PASSWORD, CONFIG_START_TABLE, CONFIG_END_TABLE, CONFIG_TABLE_COLUMNS = load_config()
 
 def send_to_server(table, color):
     if not SERVER_URL:
@@ -91,13 +146,14 @@ def process_serial_data():
                 continue
 
             try:
-                table_index = int(table_str) - start_table  # Adjust for dynamic table range
+                table_number = int(table_str)
                 color_id = int(color_str)
 
-                if 0 <= table_index < len(canvases):
-                    root.after(0, update_table_color_from_serial, table_index, color_id)  # Use after() for safe updates
-                else:
-                    print(f"Invalid TableNr: {table_str}")
+                if table_number not in canvas_by_table:
+                    print(f"Table number {table_number} is not shown in current layout, ignoring")
+                    continue
+
+                root.after(0, update_table_color_from_serial, table_number, color_id)  # Use after() for safe updates
 
             except ValueError:
                 print("Non-integer TableNr or ColorID")
@@ -105,62 +161,64 @@ def process_serial_data():
         except Exception as e:
             print(f"Error reading serial data: {e}")
 
-def update_table_color_from_serial(index, color_id):
+def update_table_color_from_serial(table_number, color_id):
     colors = {0: 'green', 1: 'orange', 2: 'red'}
     new_color = colors.get(color_id, None)
 
     if new_color:
-        print(f"Updating table {index + start_table} to color {new_color}")  # Debug statement
-        current_color = table_colors[index]
+        print(f"Updating table {table_number} to color {new_color}")  # Debug statement
+        current_color = color_by_table[table_number]
+
+        if new_color == current_color:
+            return
 
         if new_color == 'red' and current_color != 'red':
-            red_start_time[index] = time.time()
+            red_start_time_by_table[table_number] = time.time()
         elif new_color != 'red':
-            red_start_time[index] = None
+            red_start_time_by_table[table_number] = None
 
-        canvases[index].itemconfig('table', fill=new_color)
-        table_colors[index] = new_color
-        send_to_server(index + start_table, new_color)
+        canvas_by_table[table_number].itemconfig('table', fill=new_color)
+        color_by_table[table_number] = new_color
+        send_to_server(table_number, new_color)
     else:
         print(f"Invalid ColorID: {color_id}")
 
-def cycle_table_color(index):
-    global ser, start_table
-    current_color = table_colors[index]
+def cycle_table_color(table_number):
+    global ser
+    current_color = color_by_table[table_number]
     next_color = {'green': 'orange', 'orange': 'red', 'red': 'green'}.get(current_color, 'green')
-    print(f"Table {index + start_table} clicked! Changing color from {current_color} to {next_color}")
+    print(f"Table {table_number} clicked! Changing color from {current_color} to {next_color}")
     if next_color == 'red' and current_color != 'red':
-        red_start_time[index] = time.time()
+        red_start_time_by_table[table_number] = time.time()
     elif next_color != 'red':
-        red_start_time[index] = None
+        red_start_time_by_table[table_number] = None
 
-    canvases[index].itemconfig('table', fill=next_color)
-    table_colors[index] = next_color
-    send_to_server(index + start_table, next_color)
+    canvas_by_table[table_number].itemconfig('table', fill=next_color)
+    color_by_table[table_number] = next_color
+    send_to_server(table_number, next_color)
 
-    # Send "hooray" over serial if connected
+    # Send over serial if connected
     if ser and ser.is_open:
         try:
             colorCode = {'green': '0', 'orange': '1', 'red': '2'}.get(next_color)
-            msg = "T," + str(index + start_table) + "," + str(colorCode) + "\n"
-            ser.write(msg.encode())  # Send "hooray" followed by a newline
+            msg = "T," + str(table_number) + "," + str(colorCode) + "\n"
+            ser.write(msg.encode())
             print("Sent " + msg + " over serial")
         except Exception as e:
             print(f"Error sending data: {e}")
 
 def reset_all_green():
-    global ser, start_table, end_table, canvases, table_colors
+    global ser
+    for table_number, canvas in canvas_by_table.items():
+        canvas.itemconfig('table', fill='green')
+        color_by_table[table_number] = 'green'
+        red_start_time_by_table[table_number] = None
+        send_to_server(table_number, 'green')
+
     if ser and ser.is_open:
-        for index in range(start_table, end_table):
-
-            canvases[index - start_table].itemconfig('table', fill='green')
-            table_colors[index - start_table] = 'green'
-            send_to_server(index, 'green')
-
-        # Send "hooray" over serial if connected
         msg = "T,-1,0\n"
         try:
-            ser.write(msg.encode())  # Send "hooray" followed by a newline
+            ser.write(msg.encode())
             print("Sent " + msg + " over serial")
         except Exception as e:
             print(f"Error sending data: {e}")
@@ -170,15 +228,14 @@ def reset_all_green():
 
 def update_longest_red_list():
     current_time = time.time()
-    durations = [(i, int(current_time - red_start_time[i]) if red_start_time[i] else 0) for i in range(len(canvases))]
+    durations = [(table_number, int(current_time - start_time) if start_time else 0) 
+                 for table_number, start_time in red_start_time_by_table.items()]
     durations.sort(key=lambda x: x[1], reverse=True)
 
-    #print("Updating red list with durations:", durations)  # Debug statement
-
     red_list.delete(0, tk.END)
-    for index, duration in durations:
+    for table_number, duration in durations:
         if duration > 0:
-            red_list.insert(tk.END, f"Table {index + start_table}: {duration}s")
+            red_list.insert(tk.END, f"Table {table_number}: {duration}s")
 
     # Schedule the function to run again
     root.after(1000, update_longest_red_list)
@@ -202,9 +259,55 @@ def connect_to_port():
         ser = None
 
 
+def render_table_grid(columns):
+    global canvas_by_table, red_start_time_by_table, color_by_table
+
+    # Calculate current grid dimensions from existing canvases
+    if canvas_by_table:
+        current_cols = max(canvas.grid_info()['column'] for canvas in canvas_by_table.values()) + 1
+        current_rows = max(canvas.grid_info()['row'] for canvas in canvas_by_table.values()) + 1
+    else:
+        current_cols = 0
+        current_rows = 0
+
+    # Destroy old canvases
+    for canvas in canvas_by_table.values():
+        canvas.destroy()
+
+    # Clear previous grid configuration
+    for c in range(current_cols):
+        tables_frame.grid_columnconfigure(c, weight=0, uniform='')
+    for r in range(current_rows):
+        tables_frame.grid_rowconfigure(r, weight=0, uniform='')
+
+    canvas_by_table.clear()
+    color_by_table.clear()
+    red_start_time_by_table.clear()
+
+    max_rows = 0
+    for col, col_tables in enumerate(columns):
+        max_rows = max(max_rows, len(col_tables))
+        for row, table_number in enumerate(col_tables):
+            canvas = tk.Canvas(tables_frame, width=100, height=20, bg='grey', highlightthickness=0, bd=0)
+            canvas.create_rectangle(10, 5, 90, 20, fill='green', tags='table')
+            canvas.create_text(50, 10, text=f"{table_number}", fill="white", font=("Helvetica", 10), tags="table_text")
+
+            canvas.tag_bind('table', '<Button-1>', lambda e, t=table_number: cycle_table_color(t))
+            canvas.tag_bind('table_text', '<Button-1>', lambda e, t=table_number: cycle_table_color(t))
+
+            canvas.grid(row=row, column=col, padx=2, pady=2, sticky='nsew')
+            canvas_by_table[table_number] = canvas
+            color_by_table[table_number] = 'green'
+            red_start_time_by_table[table_number] = None
+
+    for c in range(len(columns)):
+        tables_frame.grid_columnconfigure(c, weight=1, uniform='table_col')
+    for r in range(max_rows):
+        tables_frame.grid_rowconfigure(r, weight=1, uniform='table_row')
+
 
 def update_table_range():
-    global start_table, end_table, canvases, red_start_time, table_colors
+    global start_table, end_table
     try:
         start_table = int(start_table_entry.get())
         end_table = int(end_table_entry.get()) + 1
@@ -212,39 +315,12 @@ def update_table_range():
             print("Start table must be less than end table.")
             return
 
-        for canvas in canvases:
-            canvas.destroy()
-            
-        # Reset grid configuration for consistent alignment
-        #for r in range((end_table - start_table + 1) // 2 + 2):
-        #    root.grid_rowconfigure(r, weight=1, uniform="row")
-        for c in range(2):  # Two columns
-            root.grid_columnconfigure(c, weight=1, uniform="column")
+        if start_table == CONFIG_START_TABLE and end_table == (CONFIG_END_TABLE + 1):
+            columns = CONFIG_TABLE_COLUMNS
+        else:
+            columns = build_default_table_columns(start_table, end_table - 1)
 
-        # Define consistent padding
-        padx = 1
-        pady = 1
-
-        canvases = []
-        red_start_time = [None] * (end_table - start_table)
-        table_colors = ['green'] * (end_table - start_table)
-
-        # Adjust grid for numbering from bottom left, up the left column, then down the right column
-        total_tables = end_table - start_table
-        num_rows = (total_tables) // 2
-
-        for i in range(start_table, end_table):
-            canvas = tk.Canvas(root, width=100, height=20, bg='grey')
-            canvas.create_rectangle(10, 5, 90, 20, fill='green', tags='table')
-            canvas.create_text(50, 10, text=f"{i}", fill="white", font=("Helvetica", 10), tags="table_text")
-            canvas.tag_bind('table', '<Button-1>', lambda e, i=i: cycle_table_color(i - start_table))  # Adjust index
-            canvases.append(canvas)
-
-            # Calculate position for bottom-left numbering
-            col = 0 if ((i - start_table + 1) <= (num_rows))  else 1
-            row = (num_rows - (i - start_table + 1)+1) if col == 0 else ((i - start_table + 1) - num_rows)  
-
-            canvas.grid(row=row, column=col, padx=padx, pady=pady, sticky='')
+        render_table_grid(columns)
 
     except ValueError:
         print("Invalid start or end table number.")
@@ -252,8 +328,9 @@ def update_table_range():
 # Initialize table range
 start_table = CONFIG_START_TABLE
 end_table = CONFIG_END_TABLE + 1
-red_start_time = [None] * (end_table - start_table)
-table_colors = ['green'] * (end_table - start_table)
+canvas_by_table = {}
+color_by_table = {}
+red_start_time_by_table = {}
 ser = None  # Serial connection object
 
 # Set up the tkinter GUI
@@ -287,8 +364,11 @@ end_table_entry.pack(pady=5)
 update_table_button = tk.Button(table_range_frame, text="Update Tables", command=update_table_range)
 update_table_button.pack(pady=5)
 
+# Dedicated frame to keep table spacing consistent
+tables_frame = tk.Frame(root)
+tables_frame.grid(row=2, column=0, columnspan=3, rowspan=10, padx=10, pady=5, sticky='nsew')
+
 # Create canvas objects for tables
-canvases = []
 update_table_range()
 
 # Listbox to display tables longest on red

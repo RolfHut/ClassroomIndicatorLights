@@ -15,7 +15,7 @@
         }
 
         #container {
-            max-width: 500px;
+            max-width: 700px;
             margin: 0 auto;
             width: 100%;
             display: flex;
@@ -70,42 +70,35 @@
 </div>
 
 <script>
-    const startTable = {{ start_table }};
-    const endTable = {{ end_table }};
+    const tableColumns = {{ table_columns | tojson }} || [];
     const allowedColors = new Set(["red", "orange", "green"]);
-    const totalTables = endTable - startTable;
-    const numRows = Math.ceil(totalTables / 2);
 
     const grid = document.getElementById("grid");
 
     function createGrid() {
-        for (let i = startTable; i < endTable; i++) {
+        const numCols = tableColumns.length;
 
-            const pos = i - startTable;
+        grid.style.gridTemplateColumns = `repeat(${numCols}, 1fr)`;
 
-            let col, row;
+        for (let col = 0; col < numCols; col++) {
+            const colTables = tableColumns[col];
+            for (let row = 0; row < colTables.length; row++) {
+                const i = colTables[row];
 
-            if (pos < numRows) {
-                col = 0;
-                row = numRows - pos - 1;
-            } else {
-                col = 1;
-                row = pos - numRows;
+                const div = document.createElement("div");
+                div.className = "table";
+                div.id = "table-" + i;
+
+                const label = document.createElement("span");
+                label.className = "table-label";
+                label.textContent = i;
+                div.appendChild(label);
+
+                div.style.gridColumn = col + 1;
+                div.style.gridRow = row + 1;
+
+                grid.appendChild(div);
             }
-
-            const div = document.createElement("div");
-            div.className = "table";
-            div.id = "table-" + i;
-
-            const label = document.createElement("span");
-            label.className = "table-label";
-            label.textContent = i;
-            div.appendChild(label);
-
-            div.style.gridColumn = col + 1;
-            div.style.gridRow = row + 1;
-
-            grid.appendChild(div);
         }
     }
 
