@@ -253,6 +253,8 @@ def connect_to_port():
         ser.close()
     try:
         ser = serial.Serial(selected_port, 115200, timeout=1)  # Updated baudrate
+        # wake up the microbit(?) otherwise no data is received until a button is pressed
+        ser.write(b"\n")
         print(f"Connected to {selected_port}")
     except Exception as e:
         print(f"Error connecting to port {selected_port}: {e}")
