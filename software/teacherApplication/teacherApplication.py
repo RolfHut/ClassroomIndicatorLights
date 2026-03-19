@@ -137,7 +137,7 @@ def process_serial_data():
             #    print(f"Room {room} is not selected, ignoring message.")
             #    continue
 
-            if ((start_table > int(table_str)) or (int(table_str) >= end_table)):
+            if ((start_table > int(table_str)) or (int(table_str) > end_table)):
                 print("Table number outside of selected range, ignoring")
                 continue
 
@@ -310,16 +310,13 @@ def update_table_range():
     global start_table, end_table
     try:
         start_table = int(start_table_entry.get())
-        end_table = int(end_table_entry.get()) + 1
-        if start_table >= end_table:
-            print("Start table must be less than end table.")
+        end_table = int(end_table_entry.get())
+        if start_table > end_table:
+            print("Start table must be less than or equal to end table.")
             return
 
-        if start_table == CONFIG_START_TABLE and end_table == (CONFIG_END_TABLE + 1):
-            columns = CONFIG_TABLE_COLUMNS
-        else:
-            columns = build_default_table_columns(start_table, end_table - 1)
-
+        # reset to default 2-column layout
+        columns = build_default_table_columns(start_table, end_table)
         render_table_grid(columns)
 
     except ValueError:
@@ -327,7 +324,7 @@ def update_table_range():
 
 # Initialize table range
 start_table = CONFIG_START_TABLE
-end_table = CONFIG_END_TABLE + 1
+end_table = CONFIG_END_TABLE
 canvas_by_table = {}
 color_by_table = {}
 red_start_time_by_table = {}
