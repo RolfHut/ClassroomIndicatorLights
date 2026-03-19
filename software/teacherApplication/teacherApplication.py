@@ -288,14 +288,21 @@ def render_table_grid(columns):
     for col, col_tables in enumerate(columns):
         max_rows = max(max_rows, len(col_tables))
         for row, table_number in enumerate(col_tables):
-            canvas = tk.Canvas(tables_frame, width=100, height=20, bg='grey', highlightthickness=0, bd=0)
-            canvas.create_rectangle(10, 5, 90, 20, fill='green', tags='table')
-            canvas.create_text(50, 10, text=f"{table_number}", fill="white", font=("Helvetica", 10), tags="table_text")
+            canvas = tk.Canvas(tables_frame, bg='grey', highlightthickness=0, bd=0)
+            canvas.create_rectangle(3, 3, 0, 0, fill='green', tags='table')
+            canvas.create_text(0, 0, text=f"{table_number}", fill="white", font=("Helvetica", 12), tags="table_text")
 
             canvas.tag_bind('table', '<Button-1>', lambda e, t=table_number: cycle_table_color(t))
             canvas.tag_bind('table_text', '<Button-1>', lambda e, t=table_number: cycle_table_color(t))
 
-            canvas.grid(row=row, column=col, padx=2, pady=2, sticky='nsew')
+            def redraw_canvas(event, c=canvas):
+                w, h = event.width, event.height
+                c.coords('table', 3, 3, w - 3, h - 3)
+                c.coords('table_text', w // 2, h // 2)
+
+            canvas.bind('<Configure>', redraw_canvas)
+            canvas.grid(row=row, column=col, padx=40, pady=3, sticky='nsew')
+            canvas.config(width=80, height=30)
             canvas_by_table[table_number] = canvas
             color_by_table[table_number] = 'green'
             red_start_time_by_table[table_number] = None
@@ -335,6 +342,11 @@ root = tk.Tk()
 root.title("Classroom Map")
 root.geometry('1200x1000')  # Adjusted size to fit all widgets
 
+# Make the window expand to fill available space
+for i in range(2, 12):  # rows 2-11 for table grid
+    root.rowconfigure(i, weight=1)
+root.columnconfigure(0, weight=1)
+
 # Dropdown for serial port selection
 port_selector = ttk.Combobox(root, state='readonly', width=30)
 port_selector.grid(row=0, column=0, padx=10, pady=10, sticky='w')
@@ -365,8 +377,8 @@ update_table_button.pack(pady=5)
 tables_frame = tk.Frame(root)
 tables_frame.grid(row=2, column=0, columnspan=3, rowspan=10, padx=10, pady=5, sticky='nsew')
 
-# Create canvas objects for tables
-update_table_range()
+# Create canvas objects for tables using config layout
+render_table_grid(CONFIG_TABLE_COLUMNS)
 
 # Listbox to display tables longest on red
 red_list = tk.Listbox(root, height=16, width=25)
