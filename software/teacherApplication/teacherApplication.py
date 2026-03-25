@@ -99,16 +99,13 @@ SERVER_URL, EVENT_PASSWORD, CONFIG_START_TABLE, CONFIG_END_TABLE, CONFIG_TABLE_C
 def send_to_server(table, color):
     if not SERVER_URL:
         return
-    try:
-        headers = {
-            "X-Event-Password": EVENT_PASSWORD
-        }
-        requests.post(SERVER_URL, json={
-            "table": table,
-            "color": color
-        }, headers=headers, timeout=0.2)
-    except:
-        pass
+    def _send():
+        try:
+            headers = {"X-Event-Password": EVENT_PASSWORD}
+            requests.post(SERVER_URL, json={"table": table, "color": color}, headers=headers, timeout=5)
+        except:
+            pass
+    threading.Thread(target=_send, daemon=True).start()
 
 def process_serial_data():
     global ser
@@ -166,11 +163,11 @@ def update_table_color_from_serial(table_number, color_id):
     new_color = colors.get(color_id, None)
 
     if new_color:
-        print(f"Updating table {table_number} to color {new_color}")  # Debug statement
         current_color = color_by_table[table_number]
-
         if new_color == current_color:
             return
+        
+        print(f"Updating table {table_number} to color {new_color}")  # Debug statement
 
         if new_color == 'red' and current_color != 'red':
             red_start_time_by_table[table_number] = time.time()
@@ -291,7 +288,7 @@ def render_table_grid(columns):
         max_rows = max(max_rows, len(col_tables))
         for row, table_number in enumerate(col_tables):
             canvas = tk.Canvas(tables_frame, bg='grey', highlightthickness=0, bd=0)
-            canvas.create_rectangle(3, 3, 0, 0, fill='green', tags='table')
+            canvas.create_rectangle(3, 3, 0, 0, fill='gray', tags='table')
             canvas.create_text(0, 0, text=f"{table_number}", fill="white", font=("Helvetica", 12), tags="table_text")
 
             canvas.tag_bind('table', '<Button-1>', lambda e, t=table_number: cycle_table_color(t))
@@ -306,7 +303,7 @@ def render_table_grid(columns):
             canvas.grid(row=row, column=col, padx=40, pady=3, sticky='nsew')
             canvas.config(width=80, height=30)
             canvas_by_table[table_number] = canvas
-            color_by_table[table_number] = 'green'
+            color_by_table[table_number] = 'gray'
             red_start_time_by_table[table_number] = None
 
     for c in range(len(columns)):
