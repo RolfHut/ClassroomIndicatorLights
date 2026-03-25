@@ -8,6 +8,43 @@ CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.ini"
 DEFAULT_START_TABLE = 1
 DEFAULT_END_TABLE = 16
 
+
+def parse_table_layout(layout: str, start: int, end: int):
+    """Parse a layout string like "1-3, 10-4, 11-17" into columns of table numbers.
+
+    Each segment defines a column. A segment like "10-4" produces a descending range.
+    """
+
+    if not layout:
+        return None
+
+    columns = []
+    for segment in layout.split(","):
+        segment = segment.strip()
+        if not segment:
+            continue
+
+        if "-" not in segment:
+            raise ValueError(f"Invalid layout segment: {segment}")
+
+        start_str, end_str = segment.split("-", 1)
+        try:
+            start_num = int(start_str)
+            end_num = int(end_str)
+        except ValueError:
+            raise ValueError(f"Invalid numbers in layout segment: {segment}")
+
+        if not (start <= start_num <= end) or not (start <= end_num <= end):
+            raise ValueError(
+                f"Table numbers in layout segment must be between {start} and {end}: {segment}"
+            )
+
+        step = 1 if end_num >= start_num else -1
+        columns.append(list(range(start_num, end_num + step, step)))
+
+    return columns
+
+
 def load_config():
     config = configparser.ConfigParser()
     if not config.read(CONFIG_PATH):
@@ -22,7 +59,29 @@ def load_config():
 
     if not event_password:
         raise SystemExit("Missing required config key: classroom.event_password")
-    return event_password, start_table, end_table
+
+    table_layout = config.get("classroom", "table_layout", fallback="").strip()
+    table_columns = None
+    if table_layout:
+        try:
+            table_columns = parse_table_layout(table_layout, start_table, end_table)
+        except ValueError as e:
+            raise SystemExit(f"Invalid classroom.table_layout: {e}")
+
+    # default layout if not set
+    if table_columns is None:
+        total_tables = end_table - start_table + 1
+        if total_tables <= 0:
+            raise SystemExit("Invalid classroom.start_table/end_table: end must be >= start")
+
+        first_count = (total_tables + 1) // 2
+        first_col = list(range(start_table, start_table + first_count))[::-1]
+        second_col = list(range(start_table + first_count, end_table + 1))
+        table_columns = [first_col]
+        if second_col:
+            table_columns.append(second_col)
+
+    return event_password, start_table, end_table, table_columns
 
 app = Flask(__name__)
 
@@ -30,14 +89,15 @@ clients = []
 table_state = {}
 
 ALLOWED_COLORS = {"red", "orange", "green"}
-EVENT_PASSWORD, START_TABLE, END_TABLE = load_config()
+EVENT_PASSWORD, START_TABLE, END_TABLE, TABLE_COLUMNS = load_config()
 
 @app.route("/")
 def index():
     return render_template(
         "index.html",
         start_table=START_TABLE,
-        end_table=END_TABLE + 1
+        end_table=END_TABLE + 1,
+        table_columns=TABLE_COLUMNS,
     )
 
 # Receive events from teacher application
